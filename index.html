@@ -1,19 +1,25 @@
 <!doctype html>
 <html>
   <head>
-    <meta charset="utf-8"> 
+    <meta charset="utf-8"> 
     <title> Portable PCJS </title>
     <script>
-
       var contentsByPath = {};
-
+    </script>
+    <script src="10mb-ega.json.js"></script>
+    <script>
       Window_Proxy.prototype = window;
       var _window_proxy = new Window_Proxy();
       
       var embedPCURL = 'https://api.github.com/repos/jeffpar/pcjs/contents';
 
-      window.addEventListener('load', function(load_event) {
+      var machineXML = '/devices/pc/machine/5160/ega/640kb/win101/machine.xml';
 
+      //devices/pc/machine/5150/mda/64kb/machine.xml
+      //docs/pcjs/demos/sample3a.xml
+
+
+      window.addEventListener('load', function(load_event) {
         var root = document.getElementById('root');
         if (!root) {
           root = document.createElement('div');
@@ -34,8 +40,6 @@
         }, false);
         
         
-
-
         if (typeof embedPC === 'function') {
           on_embedPC_loaded();
           return;
@@ -45,35 +49,29 @@
           embedPCDownloadScript.src = embedPCURL + '/versions/pcjs/1.17.1/pc-dbg.js?callback=on_embedPC_script_downloaded';
           document.body.appendChild(embedPCDownloadScript);
         }
-
         window.on_embedPC_script_downloaded = function on_embedPC_script_downloaded(result) {
           document.body.removeChild(embedPCDownloadScript);
+          if (!result.data.content) {
+            alert(result.data.message+'\n'+embedPCDownloadScript.src+'\n\n'+JSON.stringify(result));
+          }
+
           var embedPC_scriptText = atob(result.data.content);
           var embedPCScript = document.createElement('script');
           embedPCScript.text =
             '(function(window, _original_window) {  '+
             embedPC_scriptText+' ; _original_window.embedPC = window.embedPC; })(_window_proxy, window);';
           document.body.appendChild(embedPCScript);
-
           on_embedPC_loaded();
         }
-
         function on_embedPC_loaded(load_event) {
-
           if (_window_proxy.onload)
             _window_proxy.onload(load_event);
 
-          embedPC("root", "/devices/pc/machine/5150/mda/64kb/machine.xml");
-          //embedPC("root", "/docs/pcjs/demos/sample3a.xml", "/docs/pcjs/demos/components.xsl");
-
+          embedPC("root", machineXML);
         }
-
         
       }, false);
         
-
-
-
       function Window_Proxy() {
         this.XMLHttpRequest = XMLHttpRequest_Proxy;
         this._callbackCounter = 0;
@@ -81,7 +79,6 @@
         this.confirm = function confirm(a,b,c,d,e) { return window.confirm(a,b,c,d,e); };
         this.alert = function alert(a,b,c,d,e) { return window.alert(a,b,c,d,e); };
       }
-
       function XMLHttpRequest_Proxy() {
         this.open = function open(method, url) {
           this._url = url;
@@ -95,55 +92,69 @@
             this.responseText = contentsByPath[this._url];
             if (typeof this.responseText != 'string')
               this.responseText = JSON.stringify(this.responseText);
-
             setTimeout(function() { _this.onreadystatechange(); }, 1);
             return;
           }
 
           // TODO: webSQL/indexedDB caching
+
+          try {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', 'http://www.pcjs.org'+this._url);
+            xhr.onreadystatechange = function() {
+              if (xhr.readyState!==4) return;
+              if (xhr.status!==200) {
+                _this.send_jsonp({data: { content: btoa(xhr.responseText) } });
+                return;
+              }
+              _this.processResult(result);
+            };
+            xhr.send();
+          }
+          catch (xhrError) {
+            this.send_jsonp();
+          }
+        };
+        this.send_jsonp = function send_jsonp() {
+          var _this = this;
           var callbackName = 'jsonpCallback'+(_window_proxy._callbackCounter++);
           window[callbackName] = function(result) {
             document.body.removeChild(reqScript);
+            _this.processResult(result);
+          };
+          var reqScript = document.createElement('script');
+          reqScript.src = embedPCURL+this._url+'?callback='+callbackName;
+          document.body.appendChild(reqScript);
+        };
+        this.processResult = function(result) {
             if (!result.data.content) {
-              alert(_this._url + ' -> ' + result.data.messsage);
+              alert(result.data.message +'\n'+this._url+'\n\n'+ JSON.stringify(result));
               return;
             }
-
-            _this.responseText = atob(result.data.content);
-            contentsByPath[_this._url] = _this.responseText;
-
-            if (_this.responseText.charAt(0)!=='<') {
+            this.responseText = atob(result.data.content);
+            contentsByPath[this._url] = this.responseText;
+            if (this.responseText.charAt(0)!=='<') {
               try {
-              	contentsByPath[_this._url] = JSON.parse(_this.responseText);
+              	contentsByPath[this._url] = JSON.parse(this.responseText);
               }
               catch (error) { }
             }
-
             var contentsByPathScript = document.getElementById('contentsByPathScript');
             if (!contentsByPathScript) {
               contentsByPathScript = document.createElement('script');
               contentsByPathScript.id = 'contentsByPathScript';
               document.body.appendChild(contentsByPathScript);
             }
-
             contentsByPathScript.text = 'var contentsByPath = '+JSON.stringify(contentsByPath).replace(new RegExp('<'+'/'+'script', 'g'),'<"+"/"+"script') +';';
-
-            _this.status = 200;
-            _this.readyState = 4;
-            _this.onreadystatechange();
-          };
-
-          var reqScript = document.createElement('script');
-          reqScript.src = embedPCURL+this._url+'?callback='+callbackName;
-          document.body.appendChild(reqScript);
+            this.status = 200;
+            this.readyState = 4;
+            this.onreadystatechange();
         };
         this.setRequestHeader = function() { };
       }
       
       function saveCurrentHTML() {
-
         exportBlob('pcjs-portable.html', ['<!doctype html>', document.documentElement.outerHTML]);
-
         function exportBlob(filename, textChunks) {
           try {
             var blob = new Blob(textChunks, { type: 'application/octet-stream' });
@@ -152,10 +163,8 @@
             exportDocumentWrite(filename, textChunks.join(''));
             return;
           }
-
           exportBlobHTML5(filename, blob);
         }
-
         function exportBlobHTML5(filename, blob) {
           var url = URL.createObjectURL(blob);
           var a = document.createElement('a');
@@ -171,35 +180,26 @@
             a.click();
           }
         }
-
         function exportDocumentWrite(filename, content) {
           var win = document.createElement('iframe');
           win.style.width = '100px';
           win.style.height = '100px';
           win.style.display = 'none';
           document.body.appendChild(win);
-
           setTimeout(function() {
             var doc = win.document;
             doc.open();
             doc.write(content);
             doc.close();
-
             doc.execCommand('SaveAs', null, filename);
           }, 200);
-
-        } 
+        } 
       }
-
     </script>
 
     <style>
-
       html,body { background: black; color: silver; }
-
 @CHARSET "UTF-8";
-
-
 .pcjs-name, .pcjs-menu {
     clear: both;
     font-weight: bold;
@@ -325,7 +325,6 @@
 .pcjs-copyright a {
     text-decoration: none;
 }
-
 @media screen and (max-width: 900px) {
     .pcjs-textarea {
         width: 100% !important;
@@ -340,4 +339,4 @@
   <body>
 
 
-  </body></html> 
+  </body></html> 
